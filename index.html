@@ -248,11 +248,20 @@
   /* ---------- sonido ---------- */
 
   var actx = null;
-  function sfx(kind){
-    if(save.muted) return;
+  function audio(){
     try{
-      if(!actx){ var AC = window.AudioContext || window.webkitAudioContext; if(!AC) return; actx = new AC(); }
+      if(!actx){
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if(!AC) return null;
+        actx = new AC();
+      }
       if(actx.state === 'suspended') actx.resume();
+      return actx;
+    }catch(e){ return null; }
+  }
+  function sfx(kind){
+    if(save.muted || !audio()) return;
+    try{
       var now = actx.currentTime;
       var spec = {
         shoot:{f:[420,760], t:'square', d:0.10, v:0.07},
@@ -272,6 +281,93 @@
       o.connect(g); g.connect(actx.destination);
       o.start(now); o.stop(now + spec.d + 0.02);
     }catch(e){}
+  }
+
+  /* ---------- música: sube de intensidad con el nivel ---------- */
+
+  var ESC = [0,3,5,7,10];                                   /* pentatónica menor en La */
+  var BAJO  = [0,-1,-1,0, 2,-1,0,-1, 3,-1,-1,3, 2,-1,0,-1];
+  var ARP   = [0,2,4,2,3,4,2,0];
+  var LEAD  = [4,-1,-1,3, -1,4,-1,-1, 2,-1,3,-1, -1,4,-1,-1];
+  var mus = {timer:null, next:0, step:0, master:null, lvl:0, bpm:100};
+  var ruido = null;
+
+  function nota(i, oct){
+    var g = ESC[((i % ESC.length) + ESC.length) % ESC.length] + 12*(oct + Math.floor(i/ESC.length));
+    return 55 * Math.pow(2, g/12);
+  }
+  function bufRuido(){
+    if(ruido) return ruido;
+    var n = Math.floor(actx.sampleRate*0.2), b = actx.createBuffer(1, n, actx.sampleRate), d = b.getChannelData(0);
+    for(var i=0;i<n;i++) d[i] = Math.random()*2 - 1;
+    ruido = b; return ruido;
+  }
+  function voz(freq, t, dur, tipo, vol){
+    var o = actx.createOscillator(), g = actx.createGain();
+    o.type = tipo; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(mus.master);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+  function charles(t, vol){
+    var src = actx.createBufferSource(), g = actx.createGain(), f = actx.createBiquadFilter();
+    src.buffer = bufRuido(); f.type = 'highpass'; f.frequency.value = 6500;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    src.connect(f); f.connect(g); g.connect(mus.master);
+    src.start(t); src.stop(t + 0.06);
+  }
+  function bombo(t, vol){
+    var o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(125, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.connect(g); g.connect(mus.master); o.start(t); o.stop(t + 0.2);
+  }
+  function paso(i, t){
+    var L = mus.lvl, b = BAJO[i];
+    if(b >= 0){
+      voz(nota(b,1), t, 0.3, 'triangle', 0.55);
+      if(L >= 5) voz(nota(b,1)*1.006, t, 0.3, 'sawtooth', 0.14);   /* bajo sucio */
+    }
+    if(i % 2 === 0) voz(nota(ARP[(i/2) % ARP.length], 3), t, 0.13, 'square', 0.09);
+    if(L >= 1 && i % 2 === 1) charles(t, 0.05 + L*0.004);
+    if(L >= 2 && i % 4 === 0) bombo(t, 0.55);
+    if(L >= 4 && LEAD[i] >= 0) voz(nota(LEAD[i], 4), t, 0.22, 'square', 0.075);
+    if(L >= 6 && i === 14) voz(nota(1, 2), t, 0.5, 'sawtooth', 0.10);
+  }
+  function volMus(){ return 0.09 + mus.lvl*0.007; }
+  function reloj(){
+    if(!mus.master || !actx) return;
+    var paso_s = 60/mus.bpm/2;
+    while(mus.next < actx.currentTime + 0.15){
+      if(mus.next > actx.currentTime - 0.05) paso(mus.step, mus.next);
+      mus.next += paso_s;
+      mus.step = (mus.step + 1) % 16;
+    }
+  }
+  function musicaNivel(i){
+    mus.lvl = i;
+    mus.bpm = 100 + i*7;
+    if(mus.master){ try{ mus.master.gain.linearRampToValueAtTime(volMus(), actx.currentTime + 1.2); }catch(e){} }
+  }
+  function musicaOn(){
+    if(save.muted || mus.timer || !audio()) return;
+    mus.master = actx.createGain();
+    mus.master.gain.setValueAtTime(0, actx.currentTime);
+    mus.master.connect(actx.destination);
+    mus.master.gain.linearRampToValueAtTime(volMus(), actx.currentTime + 1.5);
+    mus.next = actx.currentTime + 0.1; mus.step = 0;
+    mus.timer = setInterval(reloj, 30);
+  }
+  function musicaOff(){
+    if(mus.timer){ clearInterval(mus.timer); mus.timer = null; }
+    var m = mus.master; mus.master = null;
+    if(m && actx){
+      try{ m.gain.linearRampToValueAtTime(0, actx.currentTime + 0.35); }catch(e){}
+      setTimeout(function(){ try{ m.disconnect(); }catch(e){} }, 600);
+    }
   }
 
   /* ---------- batalla ---------- */
@@ -323,6 +419,7 @@
          parts:[], floats:[], shake:0, aim:{a:-0.95, p:0.62}, drag:false, aiming:null, t:0};
     Z = ZM; zt = ZM;
     cam.x = 0; cam.y = CAM_MAP_Y; cam.tx = 0; cam.ty = CAM_MAP_Y;
+    musicaNivel(G.li);
     syncHud();
   }
 
@@ -685,49 +782,38 @@
 
   /* ---------- escenario ---------- */
 
-  /* balsa: cubierta de troncos amarrados, con las puntas a la vista y flotando */
-  function drawRaft(cx, half, y){
-    var back = y - 9, front = y + 6;
-    ctx.fillStyle = 'rgba(0,0,0,.15)';
-    ctx.beginPath(); ctx.ellipse(cx, y + 28, half + 4, 8, 0, 0, Math.PI*2); ctx.fill();
+  /* balsa inflable: dos tubos de goma, piso entre medio y agarraderas */
+  var GOMA_JUGADOR = {main:'#ffb648', dark:'#cf8d2c', floor:'#525862', rope:'#fff1c9', valve:'#2b2f36'};
+  var GOMA_PIRATA  = {main:'#3b4450', dark:'#232a33', floor:'#1b212a', rope:'#c9502f', valve:'#c9502f'};
 
-    var n = Math.max(4, Math.round(half*2/20));
-    var step = (half*2)/n, r = step/2;
-
-    /* cubierta en leve picado */
-    ctx.beginPath();
-    ctx.moveTo(cx - half + 10, back); ctx.lineTo(cx + half - 10, back);
-    ctx.lineTo(cx + half, front);     ctx.lineTo(cx - half, front);
-    ctx.closePath(); ink('#b58048', 2.8);
-
-    /* separación entre tronco y tronco sobre la cubierta */
-    ctx.strokeStyle = 'rgba(58,33,13,.5)'; ctx.lineWidth = 1.7;
-    for(var i=1;i<n;i++){
-      var xf = cx - half + step*i;
-      var xb = cx - half + 10 + (step*i)*((half*2 - 20)/(half*2));
-      ctx.beginPath(); ctx.moveTo(xb, back + 1); ctx.lineTo(xf, front - 1); ctx.stroke();
+  function drawInflatable(cx, half, y, parte, col){
+    var h = 20, yt = y - 3;
+    if(parte === 'atras'){
+      ctx.fillStyle = 'rgba(0,0,0,.15)';
+      ctx.beginPath(); ctx.ellipse(cx, y + 24, half + 2, 7, 0, 0, Math.PI*2); ctx.fill();
+      rr(cx - half + 7, y - 16, (half-7)*2, 15, 7.5); ink(col.dark, 2.6);     /* tubo del fondo */
+      rr(cx - half + 12, y - 7, (half-12)*2, 12, 4); ink(col.floor, 2.4);     /* piso */
+      return;
     }
+    rr(cx - half, yt, half*2, h, h/2); ink(col.main, 2.8);                    /* tubo delantero */
+    circle(cx - half + h/2, yt + h/2 - 4, h/2 + 2); ink(col.main, 2.8);       /* proa levantada */
+    circle(cx + half - h/2, yt + h/2 - 4, h/2 + 2); ink(col.main, 2.8);       /* popa levantada */
 
-    /* puntas de los troncos, medio hundidas */
-    for(var j=0;j<n;j++){
-      var x = cx - half + step*(j + 0.5);
-      circle(x, front + r*0.62, r); ink(j%2 ? '#8a5c33' : '#794e2a', 2.3);
-      circle(x, front + r*0.62, r*0.36); ink('#643f1f', 0);
+    ctx.strokeStyle = 'rgba(0,0,0,.32)'; ctx.lineWidth = 1.8;                 /* cámaras de aire */
+    for(var x = cx - half + h; x < cx + half - h*0.6; x += 23){
+      ctx.beginPath(); ctx.moveTo(x, yt + 3); ctx.lineTo(x, yt + h - 3); ctx.stroke();
     }
+    ctx.fillStyle = 'rgba(255,255,255,.28)';                                  /* brillo de goma */
+    rr(cx - half + h*0.8, yt + 3, Math.max(6, half*2 - h*1.6), 4, 2); ctx.fill();
 
-    /* cuerdas de amarre: una sobre la cubierta y otra cruzando las puntas */
-    ctx.strokeStyle = '#e8c98d'; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(cx - half + 13, back + 4); ctx.lineTo(cx + half - 13, back + 4); ctx.stroke();
-    ctx.beginPath();
-    for(var k=0;k<=n;k++){
-      var xx = cx - half + step*k, yy = front + r*0.3 + (k%2 ? 4 : -2);
-      k === 0 ? ctx.moveTo(xx, yy) : ctx.lineTo(xx, yy);
+    ctx.strokeStyle = col.rope; ctx.lineWidth = 2.2; ctx.lineCap = 'round';   /* agarraderas */
+    for(var k=-1;k<=1;k++){
+      ctx.beginPath(); ctx.arc(cx + k*half*0.55, yt + h - 1, 5, Math.PI*0.12, Math.PI*0.88); ctx.stroke();
     }
-    ctx.stroke();
+    circle(cx - half + h*0.95, yt + h*0.45, 3); ink(col.valve, 1.8);          /* válvula */
 
-    /* espuma en la línea de flotación */
     ctx.fillStyle = 'rgba(255,255,255,.34)';
-    ctx.beginPath(); ctx.ellipse(cx, WATER + 3, half + 10, 6, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx, WATER + 3, half + 8, 6, 0, 0, Math.PI*2); ctx.fill();
   }
 
   function drawChest(x, y){
@@ -738,9 +824,19 @@
     ctx.restore();
   }
 
+  function bobOf(u){
+    return (u.plat === 'raft' || u.plat === 'none' || u.plat === 'crew') ? Math.sin(T*1.7 + u.x*0.02)*3 : 0;
+  }
+  function drawRaftsFront(bobP){
+    drawInflatable(162, 86, 418 + bobP, 'adelante', GOMA_JUGADOR);
+    for(var i=0;i<G.units.length;i++){
+      var u = G.units[i];
+      if(u.alive && u.plat === 'raft') drawInflatable(u.x, 48, u.y + bobOf(u), 'adelante', GOMA_PIRATA);
+    }
+  }
   function drawPlayerRaft(bob){
     ctx.save(); ctx.translate(0, bob);
-    drawRaft(162, 86, 418);
+    drawInflatable(162, 86, 418, 'atras', GOMA_JUGADOR);
     drawChest(222, 418);
     ctx.beginPath(); ctx.moveTo(92,418); ctx.lineTo(92,360); ctx.strokeStyle=INK; ctx.lineWidth=6; ctx.stroke();
     ctx.strokeStyle='#8a5c33'; ctx.lineWidth=3.5; ctx.stroke();
@@ -753,7 +849,7 @@
   function drawPlatform(u, bob){
     var x = u.x, y = u.y + bob;
     if(u.plat === 'raft'){
-      drawRaft(x, 48, y);
+      drawInflatable(x, 48, y, 'atras', GOMA_PIRATA);
       ctx.beginPath(); ctx.moveTo(x+34, y); ctx.lineTo(x+34, y-54);
       ctx.strokeStyle = INK; ctx.lineWidth = 6; ctx.stroke();
       ctx.strokeStyle = '#7b5029'; ctx.lineWidth = 3.5; ctx.stroke();
@@ -952,7 +1048,7 @@
     for(var i=0;i<G.units.length;i++){
       var u = G.units[i];
       if(!u.alive) continue;
-      var bob = (u.plat === 'raft' || u.plat === 'none' || u.plat === 'crew') ? Math.sin(T*1.7 + u.x*0.02)*3 : 0;
+      var bob = bobOf(u);
       var c = center(u);
       var x = sX(c.x), y = sY(c.y + bob - (u.look.shark ? 56 : 58));
       if(x < -60 || x > W+60) continue;
@@ -1029,7 +1125,7 @@
       var us = G.units.slice().sort(function(a,b){ return a.y - b.y; });
       for(var i=0;i<us.length;i++){
         var u = us[i];
-        var bob = (u.plat === 'raft' || u.plat === 'none' || u.plat === 'crew') ? Math.sin(T*1.7 + u.x*0.02)*3 : 0;
+        var bob = bobOf(u);
         if(!u.alive){
           ctx.save(); ctx.globalAlpha = 0.45; ctx.translate(u.x, WATER + 16); ctx.rotate(-0.22);
           rr(-22,-7,44,12,6); ink('#47606f', 2.2); ctx.restore();
@@ -1039,6 +1135,7 @@
         if(u.look.shark) drawShark(u, bob);
         else drawPerson(u, bob, G.phase === 'aim' && u === shooter() && modal.hidden);
       }
+      drawRaftsFront(bobP);
       if(G.phase === 'aim' && modal.hidden) drawAimWorld();
       if(G.phase === 'foeAim') drawFoeAim();
       if(G.proj) drawBall(G.proj);
@@ -1135,6 +1232,7 @@
   document.getElementById('btnSound').addEventListener('click', function(){
     save.muted = !save.muted; storeSave();
     this.textContent = 'Sonido: ' + (save.muted ? 'off' : 'on');
+    save.muted ? musicaOff() : musicaOn();
   });
   document.getElementById('btnMenu').addEventListener('click', screenMenu);
   selWeapon.addEventListener('change', function(){ pickWeapon(+this.value); });
@@ -1149,9 +1247,9 @@
     var el = e.target.closest('[data-act]');
     if(!el) return;
     var act = el.getAttribute('data-act');
-    if(act === 'play'){ closeSheet(); startLevel(save.level >= LEVELS.length ? LEVELS.length-1 : save.level); }
-    else if(act === 'retry'){ closeSheet(); save.hp = [maxHp(), maxHp()]; storeSave(); startLevel(G ? G.li : save.level); }
-    else if(act === 'next'){ closeSheet(); startLevel(save.level); }
+    if(act === 'play'){ closeSheet(); startLevel(save.level >= LEVELS.length ? LEVELS.length-1 : save.level); musicaOn(); }
+    else if(act === 'retry'){ closeSheet(); save.hp = [maxHp(), maxHp()]; storeSave(); startLevel(G ? G.li : save.level); musicaOn(); }
+    else if(act === 'next'){ closeSheet(); startLevel(save.level); musicaOn(); }
     else if(act === 'shop'){ screenShop(); }
     else if(act === 'menu'){ screenMenu(); }
     else if(act === 'reset'){ resetSave(); startLevel(0); screenMenu(); }
