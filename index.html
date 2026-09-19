@@ -85,29 +85,21 @@
   .actions.grandes button{font-size:16px;padding:13px 20px}
   .actions.grandes button:first-child{flex:1 1 100%}
   @media (prefers-reduced-motion: reduce){ .hero .nube,.hero .balsita{animation:none} }
-  .mapa{position:relative;aspect-ratio:16/9;background:#0a2b38;border:3px solid #23748f;
-        border-radius:18px;overflow:hidden;margin:0 0 14px}
-  .mapa.c2{background:#0b2233;border-color:#2b6f8f}
+  .mapa{position:relative;border:3px solid #23748f;border-radius:18px;overflow:hidden;
+        margin:0 0 10px;background:#0a3247;line-height:0}
+  .mapa svg{display:block;width:100%;height:auto}
+  .isla[data-act]{cursor:pointer}
+  .isla .pulso{transform-box:fill-box;transform-origin:center}
+  .isla.ahora .pulso{animation:latir 1.6s ease-in-out infinite}
+  .isla[data-act]:hover .pulso{transform:scale(1.1)}
+  @keyframes latir{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
   .tabs{display:flex;gap:8px;margin:0 0 12px}
   .tabs button{flex:1 1 0;font-size:12.5px;padding:10px 12px;border-radius:12px;
                background:linear-gradient(#123f51,#0c2f3d);color:#9dc4d4;border-color:#1f6b86;box-shadow:0 3px 0 #08222c}
   .tabs button.act{background:linear-gradient(#ffe391,#f3c25c);color:#06222e;border-color:#7a5418;box-shadow:0 3px 0 #7a5418}
   .tabs button[disabled]{opacity:.42}
-  .nombre-nivel{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:11.5px;
-                font-weight:800;color:#87b0c2;letter-spacing:.04em}
-  .mapa svg{position:absolute;inset:0;width:100%;height:100%}
-  .nodo{position:absolute;transform:translate(-50%,-50%);width:40px;height:40px;padding:0;border-radius:50%;
-        border:3px solid var(--line);background:#0a2b38;color:#8fb8c9;display:grid;place-items:center;
-        font-family:'Titan One',serif;font-weight:400;font-size:16px;box-shadow:none;cursor:default}
-  .nodo.hecho{background:#2b7d57;border-color:#7fe3a0;color:#eaf8ff;cursor:pointer}
-  .nodo.ahora{background:linear-gradient(#ffe391,#f3c25c);border-color:#fff1c9;color:#06222e;cursor:pointer;animation:latir 1.5s ease-in-out infinite}
-  .nodo.bloq{opacity:.4}
-  .nodo:active{transform:translate(-50%,-50%) scale(.94)}
-  @keyframes latir{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.13)}}
-  .ficha{position:absolute;width:42px;transform:translate(-50%,-125%);pointer-events:none;
-         transition:left .95s cubic-bezier(.34,1.28,.5,1), top .95s cubic-bezier(.34,1.28,.5,1);
-         filter:drop-shadow(0 4px 7px rgba(0,0,0,.55))}
-  @media (prefers-reduced-motion: reduce){ .ficha{transition:none} .nodo.ahora{animation:none} }
+  .pie-mapa{margin:0 0 14px;font-size:12.5px;font-weight:800;color:#9dc4d4;text-align:center}
+  @media (prefers-reduced-motion: reduce){ .isla.ahora .pulso{animation:none} }
   .wallet{display:flex;align-items:baseline;gap:12px;background:#08222c;border:3px solid var(--good);border-radius:16px;padding:12px 18px;margin:0 0 16px}
   .wallet span{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#8fb8c9}
   .wallet b{font-family:'Titan One',serif;font-weight:400;font-size:clamp(30px,8vw,44px);line-height:1;color:var(--good);font-variant-numeric:tabular-nums;text-shadow:0 3px 0 rgba(0,0,0,.35)}
@@ -1478,46 +1470,142 @@
     );
   }
 
-  /* mapa: ocho paradas por capítulo, en serpentina */
-  function posNodo(k){
-    var fila = Math.floor(k/4), col = k%4;
-    if(fila === 1) col = 3 - col;
-    return {x: 15 + col*23.3, y: 73 - fila*41 + (k%2 ? -6 : 6)};
+  /* mapa: ocho paradas unidas por una ruta curva que la balsa recorre */
+  var PARADAS = [
+    {x:34,  y:136}, {x:98,  y:124}, {x:164, y:139}, {x:230, y:121},
+    {x:283, y:87},  {x:223, y:59},  {x:153, y:47},  {x:80,  y:61}
+  ];
+
+  function rutaD(){
+    var d = 'M' + PARADAS[0].x + ' ' + PARADAS[0].y;
+    for(var i=1;i<PARADAS.length;i++){
+      var a = PARADAS[i-1], b = PARADAS[i];
+      var mx = (a.x + b.x)/2, my = (a.y + b.y)/2 + (i%2 ? -15 : 13);
+      d += ' Q' + mx.toFixed(1) + ' ' + my.toFixed(1) + ' ' + b.x + ' ' + b.y;
+    }
+    return d;
+  }
+
+  function islaSVG(k, i, estado){
+    var p = PARADAS[k];
+    var arena = estado === 'bloq' ? '#6e7f89' : '#f2d7a0';
+    var disco = estado === 'hecho' ? '#3fa86a' : (estado === 'ahora' ? '#ffd23f' : '#12303e');
+    var tinta = estado === 'ahora' ? '#06222e' : '#eaf8ff';
+    var bandera = estado === 'hecho'
+      ? '<path d="M11 -10 v-13" stroke="#1d1710" stroke-width="1.8"/>' +
+        '<path d="M11 -23 l10 3 l-10 3 z" fill="#3fa86a" stroke="#1d1710" stroke-width="1.4"/>'
+      : '';
+    return '<g class="isla ' + estado + '" transform="translate(' + p.x + ',' + p.y + ')"' +
+           (i <= save.level ? ' data-act="ir" data-id="' + i + '"' : '') + '>' +
+             '<ellipse cx="0" cy="9" rx="20" ry="5" fill="rgba(3,24,36,.45)"/>' +
+             '<path d="M-18 7 q18 -16 36 0 z" fill="' + arena + '" stroke="#1d1710" stroke-width="1.7"/>' +
+             bandera +
+             '<g class="pulso">' +
+               '<circle cx="0" cy="-7" r="10.5" fill="' + disco + '" stroke="#1d1710" stroke-width="2"/>' +
+               '<text x="0" y="-3" text-anchor="middle" font-family="Titan One, Georgia, serif" ' +
+                     'font-size="11" fill="' + tinta + '">' + (i+1) + '</text>' +
+             '</g>' +
+           '</g>';
+  }
+
+  function largoParadas(ruta, L){
+    var N = 500, pts = [], res = [];
+    for(var i=0;i<=N;i++) pts.push(ruta.getPointAtLength(L*i/N));
+    for(var k=0;k<PARADAS.length;k++){
+      var mejor = 0, dm = 1e9;
+      for(var j=0;j<=N;j++){
+        var dx = pts[j].x - PARADAS[k].x, dy = pts[j].y - PARADAS[k].y, dd = dx*dx + dy*dy;
+        if(dd < dm){ dm = dd; mejor = j; }
+      }
+      res.push(L*mejor/N);
+    }
+    return res;
+  }
+  function ponerBalsa(ruta, g, d, fase){
+    var L = ruta.getTotalLength();
+    var a = ruta.getPointAtLength(Math.max(0, d - 2));
+    var b = ruta.getPointAtLength(Math.min(L, d + 2));
+    var ang = Math.atan2(b.y - a.y, b.x - a.x)*180/Math.PI*0.32;
+    var p = ruta.getPointAtLength(d);
+    var bob = Math.sin(fase*Math.PI*9)*1.6;
+    g.setAttribute('transform',
+      'translate(' + p.x.toFixed(2) + ',' + (p.y + 19 + bob).toFixed(2) + ') rotate(' + ang.toFixed(2) + ')');
+  }
+  function navegar(kDesde, kHasta){
+    var ruta, avance, g;
+    try{
+      ruta = document.getElementById('rutaMapa');
+      avance = document.getElementById('avanceMapa');
+      g = document.getElementById('balsaMapa');
+    }catch(e){ return; }
+    if(!ruta || !g || typeof ruta.getTotalLength !== 'function') return;
+    var L = ruta.getTotalLength(), pos = largoParadas(ruta, L);
+    var d0 = pos[kDesde], d1 = pos[kHasta];
+    function pintar(d, fase){
+      ponerBalsa(ruta, g, d, fase);
+      if(avance && avance.style){
+        avance.style.strokeDasharray = L;
+        avance.style.strokeDashoffset = (L - d);
+      }
+    }
+    pintar(d0, 0);
+    if(kDesde === kHasta) return;
+    var t0 = (window.performance && performance.now) ? performance.now() : Date.now(), dur = 2000;
+    (function tick(){
+      var ahora = (window.performance && performance.now) ? performance.now() : Date.now();
+      var u = Math.min(1, (ahora - t0)/dur);
+      var e = u < 0.5 ? 4*u*u*u : 1 - Math.pow(-2*u + 2, 3)/2;
+      pintar(d0 + (d1 - d0)*e, u);
+      if(u < 1) requestAnimationFrame(tick);
+      else sfx('coin');
+    })();
   }
 
   function screenMapa(desde, capVer){
     var actual = Math.min(save.level, LEVELS.length-1);
     var cap = (capVer === undefined || capVer === null) ? capDe(actual) : capVer;
     var idxs = nivelesDe(cap);
-    var pts = [], nodos = '';
+
+    var islas = '';
     for(var k=0;k<idxs.length;k++){
-      var i = idxs[k], q = posNodo(k);
-      pts.push(q.x + ',' + q.y);
-      var estado = i < save.level ? 'hecho' : (i === save.level ? 'ahora' : 'bloq');
-      nodos += '<button class="nodo ' + estado + '" style="left:' + q.x + '%;top:' + q.y + '%"' +
-               (i <= save.level ? ' data-act="ir" data-id="' + i + '"' : ' disabled') +
-               ' type="button" title="' + LEVELS[i].name + '">' + (i+1) + '</button>';
+      var i = idxs[k];
+      islas += islaSVG(k, i, i < save.level ? 'hecho' : (i === save.level ? 'ahora' : 'bloq'));
     }
 
+    var olas = '';
+    for(var w=0; w<9; w++){
+      var wx = 12 + (w%5)*62, wy = 26 + Math.floor(w/5)*104 + (w%3)*9;
+      olas += '<path d="M' + wx + ' ' + wy + ' q5 -4 10 0 t10 0" fill="none" ' +
+              'stroke="rgba(255,255,255,.10)" stroke-width="1.6" stroke-linecap="round"/>';
+    }
+
+    var d = rutaD();
     var animar = desde !== null && desde !== undefined && capDe(desde) === cap && desde !== actual;
-    var kf = idxs.indexOf(animar ? desde : (capDe(actual) === cap ? actual : idxs[0]));
-    var p0 = posNodo(kf < 0 ? 0 : kf);
-    var ficha =
-      '<svg class="ficha" id="ficha" viewBox="0 0 44 30" style="left:' + p0.x + '%;top:' + p0.y + '%">' +
-        '<ellipse cx="22" cy="21" rx="19" ry="7.5" fill="#ffb648" stroke="#1d1710" stroke-width="2.4"/>' +
-        '<ellipse cx="22" cy="18" rx="12" ry="4" fill="#525862" stroke="#1d1710" stroke-width="2"/>' +
-        '<circle cx="22" cy="9" r="5.6" fill="#f3c49a" stroke="#1d1710" stroke-width="2.4"/>' +
-        '<path d="M16 6 q6 -7 12 -1" fill="none" stroke="#f4cf5e" stroke-width="3.4" stroke-linecap="round"/>' +
-      '</svg>';
+    var kIni = idxs.indexOf(animar ? desde : (capDe(actual) === cap ? actual : idxs[0]));
+    if(kIni < 0) kIni = 0;
 
-    var deco = '';
-    for(var w=0; w<7; w++){
-      var wx = 6 + w*14, wy = 12 + (w%3)*30;
-      deco += '<path d="M' + wx + ' ' + wy + ' q3 -3 6 0 t6 0" fill="none" ' +
-              'stroke="rgba(255,255,255,.07)" stroke-width="1.1"/>';
-    }
-    deco += '<g stroke="rgba(255,255,255,.10)" stroke-width="0.9" fill="none">' +
-            '<circle cx="90" cy="13" r="5"/><path d="M90 6 v14 M83 13 h14"/></g>';
+    var svg =
+      '<svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid meet">' +
+        '<defs><linearGradient id="gmar" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0" stop-color="' + (cap ? '#123d5e' : '#15648a') + '"/>' +
+          '<stop offset="1" stop-color="' + (cap ? '#081c2e' : '#0a3247') + '"/>' +
+        '</linearGradient></defs>' +
+        '<rect width="320" height="180" fill="url(#gmar)"/>' + olas +
+        '<g stroke="rgba(255,255,255,.12)" stroke-width="1" fill="none">' +
+          '<circle cx="296" cy="26" r="7"/><path d="M296 16 v20 M286 26 h20"/></g>' +
+        '<path id="rutaMapa" d="' + d + '" fill="none" stroke="rgba(255,255,255,.28)" ' +
+              'stroke-width="2" stroke-dasharray="5 5" stroke-linecap="round"/>' +
+        '<path id="avanceMapa" d="' + d + '" fill="none" stroke="#ffd23f" stroke-width="2.6" ' +
+              'stroke-linecap="round" style="stroke-dasharray:0 9999;stroke-dashoffset:0"/>' +
+        islas +
+        '<g id="balsaMapa" transform="translate(' + PARADAS[kIni].x + ',' + (PARADAS[kIni].y + 19) + ')">' +
+          '<ellipse cx="0" cy="7" rx="19" ry="4.5" fill="rgba(255,255,255,.42)"/>' +
+          '<ellipse cx="0" cy="2" rx="15.5" ry="6" fill="#ffb648" stroke="#1d1710" stroke-width="2.1"/>' +
+          '<ellipse cx="0" cy="-0.6" rx="9.5" ry="3" fill="#525862" stroke="#1d1710" stroke-width="1.6"/>' +
+          '<circle cx="0" cy="-8" r="4.8" fill="#f3c49a" stroke="#1d1710" stroke-width="1.8"/>' +
+          '<path d="M-4 -10.8 q4 -4.6 8 -0.9" fill="none" stroke="#f4cf5e" stroke-width="2.8" stroke-linecap="round"/>' +
+        '</g>' +
+      '</svg>';
 
     var tabs = '';
     for(var c=0;c<CAPS.length;c++){
@@ -1540,13 +1628,10 @@
       '<p class="lead">' + CAPS[cap].lead + '</p>' +
       resumen +
       '<div class="tabs">' + tabs + '</div>' +
-      '<div class="mapa' + (cap ? ' c2' : '') + '">' +
-        '<svg viewBox="0 0 100 100" preserveAspectRatio="none">' + deco +
-          '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#2f83a3" stroke-width="0.9" ' +
-          'stroke-dasharray="2.6 2.6" stroke-linecap="round"/></svg>' +
-        nodos + ficha +
-        '<div class="nombre-nivel">' + (capDe(actual) === cap ? (actual+1) + '. ' + LEVELS[actual].name : CAPS[cap].sub) + '</div>' +
-      '</div>' +
+      '<div class="mapa">' + svg + '</div>' +
+      '<p class="pie-mapa">' +
+        (capDe(actual) === cap ? 'Parada ' + (actual+1) + ': ' + LEVELS[actual].name : CAPS[cap].name) +
+      '</p>' +
       '<div class="actions">' +
         '<button data-act="play" type="button">Jugar nivel ' + (actual+1) + '</button>' +
         '<button class="ghost" data-act="shop" type="button">Tienda</button>' +
@@ -1554,14 +1639,8 @@
       '</div>'
     );
 
-    if(animar){
-      setTimeout(function(){
-        var f = document.getElementById('ficha');
-        if(!f) return;
-        var q2 = posNodo(idxs.indexOf(actual));
-        f.style.left = q2.x + '%'; f.style.top = q2.y + '%';
-      }, 180);
-    }
+    var kFin = capDe(actual) === cap ? idxs.indexOf(actual) : kIni;
+    setTimeout(function(){ navegar(kIni, kFin < 0 ? kIni : kFin); }, 120);
   }
 
   function screenCapitulo(li){
