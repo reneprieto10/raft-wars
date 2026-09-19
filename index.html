@@ -85,11 +85,20 @@
   .actions.grandes button{font-size:16px;padding:13px 20px}
   .actions.grandes button:first-child{flex:1 1 100%}
   @media (prefers-reduced-motion: reduce){ .hero .nube,.hero .balsita{animation:none} }
-  .mapa{position:relative;aspect-ratio:16/10;background:radial-gradient(120% 90% at 50% 100%, #15586f 0%, #0a2b38 72%);border:3px solid #23748f;border-radius:18px;overflow:hidden;margin:0 0 14px}
+  .mapa{position:relative;aspect-ratio:16/9;background:#0a2b38;border:3px solid #23748f;
+        border-radius:18px;overflow:hidden;margin:0 0 14px}
+  .mapa.c2{background:#0b2233;border-color:#2b6f8f}
+  .tabs{display:flex;gap:8px;margin:0 0 12px}
+  .tabs button{flex:1 1 0;font-size:12.5px;padding:10px 12px;border-radius:12px;
+               background:linear-gradient(#123f51,#0c2f3d);color:#9dc4d4;border-color:#1f6b86;box-shadow:0 3px 0 #08222c}
+  .tabs button.act{background:linear-gradient(#ffe391,#f3c25c);color:#06222e;border-color:#7a5418;box-shadow:0 3px 0 #7a5418}
+  .tabs button[disabled]{opacity:.42}
+  .nombre-nivel{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:11.5px;
+                font-weight:800;color:#87b0c2;letter-spacing:.04em}
   .mapa svg{position:absolute;inset:0;width:100%;height:100%}
-  .nodo{position:absolute;transform:translate(-50%,-50%);width:34px;height:34px;padding:0;border-radius:50%;
+  .nodo{position:absolute;transform:translate(-50%,-50%);width:40px;height:40px;padding:0;border-radius:50%;
         border:3px solid var(--line);background:#0a2b38;color:#8fb8c9;display:grid;place-items:center;
-        font-family:'Titan One',serif;font-weight:400;font-size:14px;box-shadow:none;cursor:default}
+        font-family:'Titan One',serif;font-weight:400;font-size:16px;box-shadow:none;cursor:default}
   .nodo.hecho{background:#2b7d57;border-color:#7fe3a0;color:#eaf8ff;cursor:pointer}
   .nodo.ahora{background:linear-gradient(#ffe391,#f3c25c);border-color:#fff1c9;color:#06222e;cursor:pointer;animation:latir 1.5s ease-in-out infinite}
   .nodo.bloq{opacity:.4}
@@ -98,8 +107,6 @@
   .ficha{position:absolute;width:42px;transform:translate(-50%,-125%);pointer-events:none;
          transition:left .95s cubic-bezier(.34,1.28,.5,1), top .95s cubic-bezier(.34,1.28,.5,1);
          filter:drop-shadow(0 4px 7px rgba(0,0,0,.55))}
-  .capnom{position:absolute;left:10px;font-family:'Titan One',serif;font-weight:400;font-size:11px;
-          letter-spacing:.09em;text-transform:uppercase;color:#87b0c2}
   @media (prefers-reduced-motion: reduce){ .ficha{transition:none} .nodo.ahora{animation:none} }
   .wallet{display:flex;align-items:baseline;gap:12px;background:#08222c;border:3px solid var(--good);border-radius:16px;padding:12px 18px;margin:0 0 16px}
   .wallet span{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#8fb8c9}
@@ -1413,6 +1420,7 @@
     else if(act === 'next'){ closeSheet(); startLevel(save.level); musicaOn(); }
     else if(act === 'shop'){ screenShop(); }
     else if(act === 'mapa'){ screenMapa(null); }
+    else if(act === 'cap'){ screenMapa(null, +el.getAttribute('data-id')); }
     else if(act === 'menu'){ screenMenu(); }
     else if(act === 'ir'){
       var n = +el.getAttribute('data-id');
@@ -1470,25 +1478,30 @@
     );
   }
 
-  /* mapa: cuatro filas en serpentina, dos capítulos */
-  function posNodo(i){
-    var fila = Math.floor(i/4), col = i%4;
-    if(fila % 2 === 1) col = 3 - col;
-    return {x: 13 + col*24.7, y: 85 - fila*21.5 + (i%2 ? -3.5 : 3.5)};
+  /* mapa: ocho paradas por capítulo, en serpentina */
+  function posNodo(k){
+    var fila = Math.floor(k/4), col = k%4;
+    if(fila === 1) col = 3 - col;
+    return {x: 15 + col*23.3, y: 73 - fila*41 + (k%2 ? -6 : 6)};
   }
 
-  function screenMapa(desde){
+  function screenMapa(desde, capVer){
     var actual = Math.min(save.level, LEVELS.length-1);
+    var cap = (capVer === undefined || capVer === null) ? capDe(actual) : capVer;
+    var idxs = nivelesDe(cap);
     var pts = [], nodos = '';
-    for(var i=0;i<LEVELS.length;i++){
-      var q = posNodo(i);
+    for(var k=0;k<idxs.length;k++){
+      var i = idxs[k], q = posNodo(k);
       pts.push(q.x + ',' + q.y);
       var estado = i < save.level ? 'hecho' : (i === save.level ? 'ahora' : 'bloq');
       nodos += '<button class="nodo ' + estado + '" style="left:' + q.x + '%;top:' + q.y + '%"' +
                (i <= save.level ? ' data-act="ir" data-id="' + i + '"' : ' disabled') +
                ' type="button" title="' + LEVELS[i].name + '">' + (i+1) + '</button>';
     }
-    var p0 = posNodo(desde === null || desde === undefined ? actual : Math.min(desde, LEVELS.length-1));
+
+    var animar = desde !== null && desde !== undefined && capDe(desde) === cap && desde !== actual;
+    var kf = idxs.indexOf(animar ? desde : (capDe(actual) === cap ? actual : idxs[0]));
+    var p0 = posNodo(kf < 0 ? 0 : kf);
     var ficha =
       '<svg class="ficha" id="ficha" viewBox="0 0 44 30" style="left:' + p0.x + '%;top:' + p0.y + '%">' +
         '<ellipse cx="22" cy="21" rx="19" ry="7.5" fill="#ffb648" stroke="#1d1710" stroke-width="2.4"/>' +
@@ -1496,6 +1509,24 @@
         '<circle cx="22" cy="9" r="5.6" fill="#f3c49a" stroke="#1d1710" stroke-width="2.4"/>' +
         '<path d="M16 6 q6 -7 12 -1" fill="none" stroke="#f4cf5e" stroke-width="3.4" stroke-linecap="round"/>' +
       '</svg>';
+
+    var deco = '';
+    for(var w=0; w<7; w++){
+      var wx = 6 + w*14, wy = 12 + (w%3)*30;
+      deco += '<path d="M' + wx + ' ' + wy + ' q3 -3 6 0 t6 0" fill="none" ' +
+              'stroke="rgba(255,255,255,.07)" stroke-width="1.1"/>';
+    }
+    deco += '<g stroke="rgba(255,255,255,.10)" stroke-width="0.9" fill="none">' +
+            '<circle cx="90" cy="13" r="5"/><path d="M90 6 v14 M83 13 h14"/></g>';
+
+    var tabs = '';
+    for(var c=0;c<CAPS.length;c++){
+      var abierto = c === 0 || save.level >= nivelesDe(c)[0];
+      tabs += '<button type="button" class="' + (c === cap ? 'act' : '') + '"' +
+              (abierto ? ' data-act="cap" data-id="' + c + '"' : ' disabled') + '>' +
+              CAPS[c].sub + ' · ' + (abierto ? CAPS[c].name : 'cerrado') + '</button>';
+    }
+
     var resumen = (G && desde !== null && desde !== undefined)
       ? '<div class="stats">' +
           '<div class="stat cash">Ganaste<b>' + money(G.earned) + '</b></div>' +
@@ -1503,29 +1534,31 @@
           '<div class="stat cash">Caja<b>' + money(save.money) + '</b></div>' +
         '</div>'
       : '';
+
     openSheet(
-      '<h2>' + (desde === null || desde === undefined ? 'Mapa' : '¡Nivel superado!') + '</h2>' +
-      '<p class="lead">' + CAPS[capDe(actual)].sub + ' · ' + CAPS[capDe(actual)].name + '. Toca un nivel desbloqueado para repetirlo.</p>' +
+      '<h2>' + (desde === null || desde === undefined ? CAPS[cap].name : '¡Nivel superado!') + '</h2>' +
+      '<p class="lead">' + CAPS[cap].lead + '</p>' +
       resumen +
-      '<div class="mapa">' +
-        '<svg viewBox="0 0 100 100" preserveAspectRatio="none">' +
-          '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#2b7d9b" stroke-width="0.8" ' +
-          'stroke-dasharray="2.4 2.4" stroke-linecap="round"/></svg>' +
-        '<div class="capnom" style="top:95%">' + CAPS[0].sub + ' · ' + CAPS[0].name + '</div>' +
-        '<div class="capnom" style="top:53%">' + CAPS[1].sub + ' · ' + CAPS[1].name + '</div>' +
+      '<div class="tabs">' + tabs + '</div>' +
+      '<div class="mapa' + (cap ? ' c2' : '') + '">' +
+        '<svg viewBox="0 0 100 100" preserveAspectRatio="none">' + deco +
+          '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#2f83a3" stroke-width="0.9" ' +
+          'stroke-dasharray="2.6 2.6" stroke-linecap="round"/></svg>' +
         nodos + ficha +
+        '<div class="nombre-nivel">' + (capDe(actual) === cap ? (actual+1) + '. ' + LEVELS[actual].name : CAPS[cap].sub) + '</div>' +
       '</div>' +
       '<div class="actions">' +
-        '<button data-act="play" type="button">Jugar nivel ' + (actual+1) + ': ' + LEVELS[actual].name + '</button>' +
+        '<button data-act="play" type="button">Jugar nivel ' + (actual+1) + '</button>' +
         '<button class="ghost" data-act="shop" type="button">Tienda</button>' +
         '<button class="ghost" data-act="menu" type="button">Menú</button>' +
       '</div>'
     );
-    if(desde !== null && desde !== undefined && desde !== actual){
+
+    if(animar){
       setTimeout(function(){
         var f = document.getElementById('ficha');
         if(!f) return;
-        var q2 = posNodo(actual);
+        var q2 = posNodo(idxs.indexOf(actual));
         f.style.left = q2.x + '%'; f.style.top = q2.y + '%';
       }, 180);
     }
