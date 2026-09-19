@@ -144,10 +144,10 @@
   /* ---------- datos ---------- */
 
   var WEAPONS = [
-    {name:'Pelota de tenis',  short:'Tenis',   dmg:16, r:8,  cost:0,    style:'tennis',   desc:'Ligera y rápida.'},
-    {name:'Pelota de béisbol',short:'Béisbol', dmg:25, r:9,  cost:380,  style:'baseball', desc:'Pesa más y duele más.'},
-    {name:'Bola de bolos',    short:'Bolos',   dmg:37, r:12, cost:1100, style:'bowling',  desc:'Un pleno en la cara del pirata.'},
-    {name:'Bala de cañón',    short:'Cañón',   dmg:52, r:13, cost:2600, style:'cannon',   desc:'Ya no es un juego de niños.'}
+    {name:'Pelota de tenis',  short:'Tenis',   dmg:16, r:8,  style:'tennis',   desc:'Ligera, rápida e infinita.'},
+    {name:'Pelota de béisbol',short:'Béisbol', dmg:25, r:9,  style:'baseball', desc:'Pesa más y duele más.'},
+    {name:'Bola de bolos',    short:'Bolos',   dmg:37, r:12, style:'bowling',  desc:'Un pleno en la cara del pirata.'},
+    {name:'Bala de cañón',    short:'Cañón',   dmg:52, r:13, style:'cannon',   desc:'Ya no es un juego de niños.'}
   ];
 
   var TYPES = {
@@ -180,8 +180,12 @@
   /* ---------- guardado ---------- */
 
   var KEY = 'guerra-de-balsas-v2';
-  var save = {money:0, weapon:0, owned:[true,false,false,false], kits:0, power:0, armor:0,
-              scope:0, crew:false, level:0, hp:[100,100], muted:false, total:0};
+  var PACKS = [null, {n:5, cost:180}, {n:3, cost:260}, {n:3, cost:460}];
+  var AMMO_MAX = 15, KIT_PACK = {n:3, cost:240}, KIT_MAX = 9;
+
+  var save = {money:0, weapon:0, ammo:[-1,0,0,0], kits:0, power:0, armor:0,
+              scope:0, crew:false, level:0, hp:[100,100], muted:false, total:0,
+              owned:null};   /* owned: solo para leer partidas viejas */
 
   function loadSave(){
     try{ var raw = localStorage.getItem(KEY);
@@ -189,26 +193,33 @@
     }catch(e){}
     fixInventory();
   }
-  /* partidas viejas guardaban solo el nivel de arma: lo convierto en inventario */
+  /* convierte partidas viejas (armas permanentes) en munición */
   function fixInventory(){
-    if(!Array.isArray(save.owned) || save.owned.length !== WEAPONS.length){
-      var t = save.weapon|0;
-      save.owned = WEAPONS.map(function(_, i){ return i <= t; });
+    if(Array.isArray(save.owned)){
+      /* partida vieja: las armas eran permanentes, las convierto en un paquete de munición */
+      var prev = save.owned;
+      save.ammo = WEAPONS.map(function(_, i){ return i === 0 ? -1 : (prev[i] ? PACKS[i].n : 0); });
+    } else if(!Array.isArray(save.ammo) || save.ammo.length !== WEAPONS.length){
+      save.ammo = WEAPONS.map(function(_, i){ return i === 0 ? -1 : 0; });
     }
-    save.owned[0] = true;
-    save.kits = Math.max(0, save.kits|0);
+    save.ammo[0] = -1;
+    for(var i=1;i<save.ammo.length;i++) save.ammo[i] = clamp(save.ammo[i]|0, 0, AMMO_MAX);
+    save.owned = null;
+    save.kits = clamp(save.kits|0, 0, KIT_MAX);
     save.weapon = clamp(save.weapon|0, 0, WEAPONS.length-1);
-    if(!save.owned[save.weapon]) save.weapon = 0;
+    if(!hasAmmo(save.weapon)) save.weapon = 0;
   }
+  function hasAmmo(i){ return i === 0 || save.ammo[i] > 0; }
+  function ammoText(i){ return i === 0 ? '∞' : '×' + save.ammo[i]; }
   function storeSave(){ try{ localStorage.setItem(KEY, JSON.stringify(save)); }catch(e){} }
   function resetSave(){
-    save.money=0; save.weapon=0; save.owned=[true,false,false,false]; save.kits=0;
+    save.money=0; save.weapon=0; save.ammo=[-1,0,0,0]; save.kits=0; save.owned=null;
     save.power=0; save.armor=0; save.scope=0;
     save.crew=false; save.level=0; save.hp=[100,100]; save.total=0; storeSave();
   }
   function maxHp(){ return 100 + save.armor*28; }
   function maxSpeed(){ return SPEED * (1 + save.power*0.09); }
-  function gun(){ return WEAPONS[save.owned[save.weapon] ? save.weapon : 0]; }
+  function gun(){ return WEAPONS[hasAmmo(save.weapon) ? save.weapon : 0]; }
 
   /* ---------- utilidades ---------- */
 
@@ -343,6 +354,16 @@
     G.proj = {x:p.x, y:p.y, vx:Math.cos(G.aim.a)*sp, vy:Math.sin(G.aim.a)*sp,
               r:w.r, dmg:w.dmg, team:'player', style:w.style, rot:0, trail:[]};
     G.phase = 'fly'; G.shots++;
+    if(save.weapon > 0){
+      save.ammo[save.weapon] = Math.max(0, save.ammo[save.weapon] - 1);
+      var vacia = save.ammo[save.weapon] === 0;
+      if(vacia){
+        save.weapon = 0;
+        var c0 = center(u);
+        floatText(c0.x, c0.y - 70, 'sin munición', '#ffb4ad', 1.4);
+      }
+      storeSave(); fillWeaponSelect(); syncHud();
+    }
     sfx('shoot');
   }
 
@@ -1068,18 +1089,20 @@
       hTurn = document.getElementById('hTurn'), hKits = document.getElementById('hKits'),
       btnKit = document.getElementById('btnKit');
 
+  var sigArmas = '';
   function fillWeaponSelect(){
     var html = '';
     for(var i=0;i<WEAPONS.length;i++){
-      if(!save.owned[i]) continue;
-      html += '<option value="' + i + '">' + (i+1) + '. ' + WEAPONS[i].short + '</option>';
+      if(!hasAmmo(i)) continue;
+      html += '<option value="' + i + '">' + (i+1) + '. ' + WEAPONS[i].short + ' ' + ammoText(i) + '</option>';
     }
     selWeapon.innerHTML = html;
     selWeapon.value = String(save.weapon);
+    sigArmas = save.ammo.join(',') + ':' + save.weapon;
   }
   function pickWeapon(i){
-    if(i < 0 || i >= WEAPONS.length || !save.owned[i]) return;
-    save.weapon = i; storeSave(); selWeapon.value = String(i);
+    if(i < 0 || i >= WEAPONS.length || !hasAmmo(i)) return;
+    save.weapon = i; storeSave(); selWeapon.value = String(i); sigArmas = save.ammo.join(',') + ':' + i;
   }
   function useKit(){
     if(!G || save.kits <= 0 || G.phase !== 'aim' || !modal.hidden) return;
@@ -1101,8 +1124,7 @@
     hMoney.textContent = money(save.money);
     hKits.textContent = save.kits;
     btnKit.disabled = !(G && save.kits > 0 && G.phase === 'aim' && modal.hidden);
-    if(selWeapon.options.length !== save.owned.filter(Boolean).length) fillWeaponSelect();
-    else selWeapon.value = String(save.weapon);
+    if(sigArmas !== save.ammo.join(',') + ':' + save.weapon) fillWeaponSelect();
     if(G){
       var w = G.L.wind;
       hWind.textContent = w === 0 ? 'calma' : (w > 0 ? '→ ' : '← ') + Math.abs(Math.round(w));
@@ -1210,16 +1232,16 @@
   var POWER = [{cost:280,label:'Brazo entrenado'},{cost:520,label:'Brazo de cañón'},{cost:880,label:'Brazo biónico'}];
   var ARMOR = [{cost:260,label:'Flotador reforzado'},{cost:480,label:'Casco de madera'},{cost:760,label:'Blindaje de chatarra'}];
   var SCOPE = [{cost:320,label:'Mira corta'},{cost:640,label:'Mira larga'}];
-  var KIT_COST = 180;
-
   function buy(id){
     var cost = 0;
     if(id.charAt(0) === 'w'){
       var i = +id.slice(1);
-      if(!WEAPONS[i] || save.owned[i]) return;
-      cost = WEAPONS[i].cost;
+      if(!WEAPONS[i] || i === 0 || save.ammo[i] >= AMMO_MAX) return;
+      cost = PACKS[i].cost;
       if(save.money < cost) return;
-      save.money -= cost; save.owned[i] = true; save.weapon = i;
+      save.money -= cost;
+      save.ammo[i] = Math.min(AMMO_MAX, save.ammo[i] + PACKS[i].n);
+      save.weapon = i;
       fillWeaponSelect();
     } else if(id === 'power'){
       if(save.power >= POWER.length) return;
@@ -1242,9 +1264,9 @@
       if(save.money < cost) return;
       save.money -= cost; save.crew = true; save.hp[1] = maxHp();
     } else if(id === 'kit'){
-      cost = KIT_COST;
-      if(save.money < cost || save.kits >= 9) return;
-      save.money -= cost; save.kits++;
+      cost = KIT_PACK.cost;
+      if(save.money < cost || save.kits >= KIT_MAX) return;
+      save.money -= cost; save.kits = Math.min(KIT_MAX, save.kits + KIT_PACK.n);
     } else return;
     sfx('coin'); storeSave(); syncHud(); screenShop();
   }
@@ -1263,9 +1285,9 @@
   function inventoryTags(){
     var t = '';
     for(var i=0;i<WEAPONS.length;i++){
-      if(!save.owned[i]) continue;
-      var sel = i === save.weapon;
-      t += '<div class="tag' + (sel ? ' on' : '') + '">' + (sel ? '▶ ' : '') + WEAPONS[i].name + ' <b>' + WEAPONS[i].dmg + '</b></div>';
+      var sel = i === save.weapon, vacia = !hasAmmo(i);
+      t += '<div class="tag' + (sel ? ' on' : (vacia ? ' off' : '')) + '">' +
+           (sel ? '▶ ' : '') + WEAPONS[i].name + ' <b>' + ammoText(i) + '</b></div>';
     }
     t += '<div class="tag' + (save.power ? '' : ' off') + '">Potencia <b>' + save.power + '/' + POWER.length + '</b></div>';
     t += '<div class="tag' + (save.armor ? '' : ' off') + '">Blindaje <b>' + save.armor + '/' + ARMOR.length + '</b></div>';
@@ -1277,10 +1299,11 @@
 
   function screenShop(){
     var cards = '';
-    for(var i=0;i<WEAPONS.length;i++){
-      var w = WEAPONS[i];
-      cards += card('w'+i, 'Arma · daño ' + w.dmg, w.name, w.desc,
-                    w.cost, save.owned[i], i === save.weapon ? 'Equipada' : 'En tu inventario');
+    for(var i=1;i<WEAPONS.length;i++){
+      var w = WEAPONS[i], pk = PACKS[i], lleno = save.ammo[i] >= AMMO_MAX;
+      cards += card('w'+i, 'Munición · daño ' + w.dmg + ' · tienes ' + save.ammo[i],
+                    w.name + ' ×' + pk.n, w.desc + ' Se gasta un tiro por lanzamiento.',
+                    pk.cost, lleno, 'Máximo ' + AMMO_MAX);
     }
     cards += save.power < POWER.length
       ? card('power', 'Mejora ' + (save.power+1) + ' de ' + POWER.length, POWER[save.power].label,
@@ -1297,9 +1320,9 @@
     cards += card('crew', 'Tripulación', save.crew ? 'Tomás a bordo' : 'Tomás, el hermano',
                   'Un segundo tirador, con turnos alternados.',
                   900, save.crew, 'A bordo');
-    cards += card('kit', 'Consumible · tienes ' + save.kits, 'Kit de reparación',
+    cards += card('kit', 'Consumible · tienes ' + save.kits, 'Kit de reparación ×' + KIT_PACK.n,
                   '+60 de vida a la tripulación. Se usa con el botón Usar.',
-                  KIT_COST, save.kits >= 9, 'Mochila llena');
+                  KIT_PACK.cost, save.kits >= KIT_MAX, 'Mochila llena');
 
     var next = Math.min(save.level, LEVELS.length-1);
     openSheet(
